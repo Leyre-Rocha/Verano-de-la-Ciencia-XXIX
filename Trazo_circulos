@@ -139,7 +139,7 @@ disp(n_filt);
 %marcando las anomalías encontradas a la imagen original
 im_original=imread('10.1_editada.png');
 L_color = label2rgb(L_filt, 'hsv', 'k', 'shuffle');%imagen de etiquetas en color
-figure();imshow(im_original);title('Detección de zonas claras en la pupila');
+figure();imshow(im_original);title('Detección de anomalias en la pupila');
 hold on;
 h = imshow(L_color);%imagen de etiquetas en color superpuesta con la imagen original
 set(h, 'AlphaData', 0.5);
