@@ -1,0 +1,146 @@
+%Codigo que traza círculos en donde se hace la transición de la intensidad
+%de blanco a negro esto para crear máscaras entre dos círuclos,
+%potseriormente detectar zonas blancas en donde debería de haber zonas
+%oscuras y viceversa, además etiqueta estas anomalías si el área de estas etiquetas
+%es mayor a cierto valor y las muestra en la imagen original (sin segmentación)
+close all;
+clear variables;
+
+%detección de círuclos en la imagen
+im = imread('10.1.seg.png');
+im = imcomplement(im);%para que los anillos sean blancos sobre fondo negro
+bordes = edge(im, 'Canny');
+[centro, radio] = imfindcircles(bordes, [15 100], 'ObjectPolarity', 'bright', 'Sensitivity', 0.9);
+[~, maxIdx] = max(radio);%encontrar el índice del círculo con el mayor radio (el que está en el centro de la pupila)
+maxcen = centro(maxIdx, :);
+maxrad = radio(maxIdx);
+figure();imshow(im);title('Círculos encontrados');
+hold on;
+viscircles(centro, radio, 'EdgeColor', 'b');
+plot(centro(:,1), centro(:,2), 'r+', 'MarkerSize', 10);
+hold off;
+disp('Radios detectados:');disp(radio);
+disp('Radio del círculo con el mayor radio:');disp(maxrad);
+
+
+%encontrar los círculos que estén en la frontera entre blanco y negro
+porcentajeMin = 0.4;% porcentaje minimo de píxeles blancos dentro del círculo
+porcentajeMax = 0.8;% porcentaje maximo de píxeles blancos dentro del círculo
+fronteras = [];
+variacion = 1; % incremento/decremento del radio en cada iteración
+radioInicial = maxrad;
+
+while radioInicial < min(size(im))/2% Incrementar el radio desde el radio máximo hasta un límite
+    % Generar los puntos del círculo
+    theta = linspace(0, 2*pi, 1000);
+    x = round(maxcen(1) + radioInicial * cos(theta));
+    y = round(maxcen(2) + radioInicial * sin(theta));
+    limite = x > 0 & x <= size(im, 2) & y > 0 & y <= size(im, 1);% Limitar los puntos al tamaño de la imagen
+    x = x(limite);
+    y = y(limite);
+    intensidad = im(sub2ind(size(im), y, x));%intensidades de los píxeles a lo largo del círculo
+    blancos = sum(intensidad) / numel(intensidad);%porcentaje de píxeles blancos
+    if blancos >= porcentajeMin && blancos < porcentajeMax% Verificar si el porcentaje de píxeles blancos alcanza el objetivo
+        fronteras = [fronteras; maxcen, radioInicial, blancos];
+    end
+    radioInicial = radioInicial + variacion;
+end
+radioInicial = maxrad - 1;% reiniciar el radio al radio máximo
+
+while radioInicial > 0% Decrementar el radio desde el radio máximo hasta llegar a 0
+    theta = linspace(0, 2*pi, 1000);
+    x = round(maxcen(1) + radioInicial * cos(theta));
+    y = round(maxcen(2) + radioInicial * sin(theta));
+    limite = x > 0 & x <= size(im, 2) & y > 0 & y <= size(im, 1);
+    x = x(limite);
+    y = y(limite);
+    intensidad = im(sub2ind(size(im), y, x));
+    blancos = sum(intensidad) / numel(intensidad);
+    if blancos >= porcentajeMin && blancos <porcentajeMax
+        fronteras = [fronteras; maxcen, radioInicial, blancos];
+    end
+    radioInicial = radioInicial - variacion;
+end
+
+% Agrupar y promediar círculos con radios similares
+threshold = 5; % umbral para considerar radios similares
+grupos = {}; % cell array para almacenar los grupos de círculos
+
+for i = 1:size(fronteras, 1)
+agregado = false;
+    for j = 1:length(grupos)
+        if abs(fronteras(i, 3) - mean(grupos{j}(:, 3))) < threshold
+            grupos{j} = [grupos{j}; fronteras(i, :)];
+            agregado = true;
+            break;
+        end
+    end
+    if ~agregado
+        grupos{end+1} = fronteras(i, :);
+    end
+end
+
+% Calcular el promedio de los círculos en cada grupo
+promedios = [];
+for i = 1:length(grupos)
+    promedio_centro = mean(grupos{i}(:, 1:2), 1);
+    promedio_radio = mean(grupos{i}(:, 3));
+    promedios = [promedios; promedio_centro promedio_radio];
+end
+
+% Dibujar los círculos promediados en la imagen
+figure();imshow(im); title('Círculos detectados en las fronteras');
+hold on;
+for i = 1:size(promedios, 1)
+    viscircles(promedios(i, 1:2), promedios(i, 3), 'EdgeColor', 'r');
+    plot(promedios(i, 1), promedios(i, 2), 'r+', 'MarkerSize', 10);
+end
+hold off;
+disp('Círculos promediados (centro [x, y], radio):');
+disp(promedios);
+
+%Para hacer una máscara binaria para cada anillo alternando entre blanco y negro
+mascara = zeros(size(im));
+[X, Y] = meshgrid(1:size(im, 2), 1:size(im, 1));
+
+for i = 1:(size(promedios, 1) - 1)
+    %distancia desde cada punto (x, y) en la imagen hasta el centro del círculo actual
+    distancia = sqrt((X - promedios(i, 1)).^2 + (Y - promedios(i, 2)).^2);
+    %para seleccionar los píxeles en la imagen que están en el anillo entre dos radios consecutivos
+    mascara_anillo = (distancia <= promedios(i+1, 3)) & (distancia < promedios(i, 3));
+    if mod(i, 2) == 1% para altener los valores de los discos entre blanco y negro
+        mascara = mascara + (mascara_anillo); % anillo blanco
+    else
+        mascara = mascara - (mascara_anillo); % anillo negro
+ end
+end
+
+mascara = mascara > 0;% verificando que la máscara final esté de 0 a 1
+mascara_inv=1-mascara;
+resultado_inv=im .* (mascara_inv);
+resultado = im .* (mascara);
+resultado_total=resultado.*(1-resultado_inv);
+figure();subplot(2,2,1); imshow(im); title('Imagen segmentada');
+subplot(2,2,2); imshow(mascara, []); title('Máscara con los círculos encontrados');
+subplot(2,2,3); imshow(resultado_total); title('Máscara aplicada en la segmentación');
+
+%etiquetar y verificar anomalías en la pupila
+[L,n] = bwlabel(resultado_total);
+disp('Número de elementos conectados');
+disp(n);
+area_region= regionprops(L, 'Area'); % calculando el área de cada región etiquetada
+nuevaL = find([area_region.Area] >= 50);%encontrar las etiquetas que cumplen con un mínimo de área
+mascara_filtrada = ismember(L, nuevaL);% nueva máscara para las regiones válidas
+subplot(2,2,4); imshow(mascara_filtrada); title('Máscara aplicada en la segmentación con filtro');
+[L_filt,n_filt] = bwlabel(mascara_filtrada);
+disp('Número de elementos conectados con filtro de área');
+disp(n_filt);
+
+%marcando las anomalías encontradas a la imagen original
+im_original=imread('10.1_editada.png');
+L_color = label2rgb(L_filt, 'hsv', 'k', 'shuffle');%imagen de etiquetas en color
+figure();imshow(im_original);title('Detección de zonas claras en la pupila');
+hold on;
+h = imshow(L_color);%imagen de etiquetas en color superpuesta con la imagen original
+set(h, 'AlphaData', 0.5);
+hold off;
