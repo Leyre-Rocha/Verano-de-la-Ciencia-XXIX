@@ -1,0 +1,71 @@
+function segm_gaussiana(imagen)
+    %   segm_gaussiana(imagen) es una función que lee la imagen, ajusta su contraste, determina el numero optimo
+    %   de clusters utilizando el metodo del codo, realiza la segmentacion
+    %   de la imagen mediante un modelo de mezcla gaussiana (GMM) y 
+    %   muestra la mascara correspondiente a la pupila.
+    %
+    %   Ejemplo de uso:
+    %       segm_gaussiana('6.1.png');
+
+    close all;
+
+    % Leer y convertir la imagen a escala de grises
+    img = imread(imagen);
+    img = rgb2gray(img);
+    figure(); 
+    title('Imagen original');
+    imshow(img); 
+
+    % Ajustar el contraste de la imagen
+    img = imadjust(img);
+
+    % Metodo del Codo para determinar el numero optimo de clusters con GMM
+    pixelVal = double(img(:));
+    distorsiones = zeros(1, 15); % Probamos hasta 15 clusters
+    for k = 1:15
+        try
+            gmm_model = fitgmdist(pixelVal, k, 'RegularizationValue', 0.01);
+            distorsiones(k) = gmm_model.BIC; % Criterio de informacion bayesiano (BIC)
+        catch
+            distorsiones(k) = NaN; % Captura de error si no converge
+        end
+    end
+
+    % Graficar la curva del codo
+    figure();
+    plot(1:15, distorsiones, 'o-'); % Ajustamos el rango del eje x
+    title('Metodo del Codo para Determinar el Numero optimo de Clusters (GMM)');
+    xlabel('Numero de Clusters');
+    ylabel('BIC');
+    grid on;
+
+    % Numero optimo segun el codo
+    [~, optimal_k] = min(distorsiones);
+    fprintf('Numero optimo de clusters segun el metodo del codo: %d\n', optimal_k);
+
+    % Segmentacion basada en Gaussian Mixture Model (GMM) con el numero de clusters obtenido del codo
+    gmm_model_optimal = fitgmdist(pixelVal, optimal_k, 'RegularizationValue', 0.01);
+    cluster_idx = cluster(gmm_model_optimal, pixelVal);
+    segmentacion_gmm = reshape(cluster_idx, size(img)); % Acomoda los indices del cluster segun la imagen original
+
+    % Mostrar la imagen original y la segmentacion por GMM
+    figure();
+    imshow(segmentacion_gmm, []);
+    title(sprintf('Segmentacion por GMM con %d clusters', optimal_k));
+    colormap(gca, parula(optimal_k)); % Colormap para resaltar los clusters
+    colorbar;
+
+    % Identificar el cluster correspondiente a la pupila (asumiendo que es el de menor intensidad)
+    cluster_means = zeros(optimal_k, 1);
+    for i = 1:optimal_k
+        cluster_means(i) = mean(pixelVal(cluster_idx == i));
+    end
+    [~, pupila_idx] = min(cluster_means);
+
+    % Mascara de la pupila
+    mascara_pupila = segmentacion_gmm == pupila_idx;
+    figure();
+    imshow(mascara_pupila);
+    title('Mascara de la pupila');
+    imwrite(~mascara_pupila, 'pupila_segmentada.png');
+end
