@@ -1,0 +1,25 @@
+close all;
+clear variables;
+
+im = imread('6.2.png');
+im = rgb2gray(im);
+im = double(im) / 255;% normalizando para que la imagen tenga valores entre 0 y 1
+umbral = graythresh(im);%umbral usando el método de Otsu
+complement = imcomplement(im);% complemento de la imagen para que las zonas oscuras sean zonas brillantes
+pupila = complement > umbral;
+[y, x] = find(pupila);%coordenadas (x, y) de los píxeles seleccionados (pupila)
+datos = [x, y];%matriz de datos para el clustering
+
+% Parámetros de DBSCAN
+epsilon = 6; % Radio de vecindad
+minPts = 10;  % Número mínimo de puntos en un vecindario para formar un cluster
+
+[idx, ~] = dbscan(datos, epsilon, minPts);% Ejecutar DBSCAN
+cluster = mode(idx(idx > 0));% para excluir los puntos que no están en ningún clúster (idx>0) y encontrar el cluster más grande
+
+pupilMask = false(size(im));%una máscara para la pupila
+pupilMask(sub2ind(size(im), y(idx == cluster), x(idx == cluster))) = true;
+pupilMask=1-pupilMask;
+ figure();subplot(1, 2, 1);imshow(im, []);title('Imagen original');
+ subplot(1, 2, 2);imshow(pupilMask);title('Segmentación de la pupila');
+imwrite(pupilMask, "6.2_segmenta.png")
