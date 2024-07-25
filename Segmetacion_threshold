@@ -1,0 +1,234 @@
+% Limpiar variables y cerrar figuras previas
+clear variables;
+close all;
+
+% Nombre de la imagen a procesar (cambiar según la imagen deseada)
+image_filename = '6_1.png';
+
+% Parámetros
+threshold = 73; % Umbral para separar oscuros
+increase_factor = 20; % Factor para aumentar la intensidad
+black_pixel_percentage_threshold = 0.20; % Umbral del porcentaje de píxeles negros en el borde
+white_pixel_percentage_threshold = 0.80; % Umbral del porcentaje de píxeles blancos en el borde
+purple_black_pixel_percentage_threshold = 0.80; % Umbral del porcentaje de píxeles negros en el borde del círculo morado
+red_white_pixel_percentage_threshold = 0.99; % Umbral del porcentaje de píxeles blancos en el borde de los círculos morados
+
+% Cargar la imagen
+img = imread(image_filename);
+
+% Convertir a escala de grises si no está en escala de grises
+if size(img, 3) == 3
+    img_gray = rgb2gray(img);
+else
+    img_gray = img;
+end
+
+% Calcular el centro y radio del círculo principal
+[height, width] = size(img_gray);
+centerX = width / 2;
+centerY = height / 2;
+radius = width / 4;
+
+% Acentuar los grises oscuros
+adjusted_img = img_gray;
+adjusted_img(img_gray < threshold) = min(255, adjusted_img(img_gray < threshold) * increase_factor);
+
+% Crear una máscara binaria para los aros
+binary_mask = adjusted_img < 255; % Aros en negro (oscuridad)
+binary_mask = double(binary_mask); % Convertir a 0 y 1
+
+% Aplicar la máscara para obtener solo los aros
+only_aros = uint8(binary_mask) * 255; % Convertir a uint8 para mostrar
+
+% Detectar circunferencias en la imagen completa
+[centers, radii] = imfindcircles(only_aros, [20 50], 'ObjectPolarity', 'dark', 'Sensitivity', 0.92);
+
+% Mostrar las imágenes originales y solo aros
+figure;
+subplot(1, 2, 1);
+imshow(img_gray);
+title(['Imagen Original: ', image_filename]);
+
+subplot(1, 2, 2);
+imshow(only_aros);
+title(['B y N: ', image_filename]);
+
+% Crear figura para mostrar círculos azul, verde y morado
+fig_circulos = figure;
+
+% Calcular desplazamiento para centrar el círculo detectado principal
+if ~isempty(centers)
+    centerXDetected = centers(1, 1);
+    centerYDetected = centers(1, 2);
+    desplazamiento_vertical = round(centerY - centerYDetected);
+    desplazamiento_horizontal = round(centerX - centerXDetected);
+
+    % Desplazar la imagen "solo aros"
+    only_aros_desplazada = circshift(only_aros, [desplazamiento_vertical, desplazamiento_horizontal]);
+
+    % Crear una máscara circular para recortar la imagen
+    [X, Y] = meshgrid(1:width, 1:height);
+    mask = uint8((X - centerX).^2 + (Y - centerY).^2 <= radius^2);
+    only_aros_recortada = only_aros_desplazada .* mask;
+
+    % Detectar circunferencias dentro del área recortada
+    [inner_centers, inner_radii] = imfindcircles(only_aros_recortada, [10 30], 'ObjectPolarity', 'dark', 'Sensitivity', 0.93);
+
+    % Mostrar la imagen "solo aros" recortada con los círculos detectados dentro
+    figure(fig_circulos);
+    imshow(only_aros_recortada);
+    hold on;
+
+    % Mostrar centro y radio del círculo azul en la barra de comandos
+    if ~isempty(inner_centers)
+        centerXBlue = inner_centers(1, 1);
+        centerYBlue = inner_centers(1, 2);
+        radiusBlue = inner_radii(1);
+
+        % Dibujar el círculo azul
+        viscircles([centerXBlue, centerYBlue], radiusBlue, 'EdgeColor', 'b', 'LineWidth', 1);
+
+        disp(['Centro del círculo azul: (' num2str(centerXBlue) ', ' num2str(centerYBlue) ')']);
+        disp(['Radio del círculo azul: ' num2str(radiusBlue)]);
+
+        % Calcular el radio inicial aumentado en un 40%
+        radiusBlueAumentado = radiusBlue * 1.40;
+
+        % Ajuste para crecer hasta que al menos el 55% de los píxeles en el borde del círculo sean negros
+        current_radius_green = radiusBlueAumentado;
+        while true
+            % Crear máscara circular para el círculo aumentado actual
+            maskCirculoAumentado = uint8((X - centerXBlue).^2 + (Y - centerYBlue).^2 <= current_radius_green^2);
+
+            % Encontrar píxeles en el borde del círculo
+            border_pixels_green = bwperim(maskCirculoAumentado);
+
+            % Calcular porcentaje de píxeles oscuros en el borde del círculo
+            black_pixels_on_border_green = sum(only_aros_recortada(border_pixels_green) == 0);
+            total_border_pixels_green = sum(border_pixels_green(:));
+            black_percentage_on_border_green = black_pixels_on_border_green / total_border_pixels_green;
+
+            % Mostrar el círculo aumentado en verde si alcanza el 55% de píxeles negros
+            if black_percentage_on_border_green >= 0.55
+                % Dibujar el círculo aumentado en verde
+                viscircles([centerXBlue, centerYBlue], current_radius_green, 'EdgeColor', 'g', 'LineWidth', 1); 
+                title(['Círculos Azul y Verde: ', image_filename]);
+
+                % Mostrar el radio del círculo verde en la barra de comandos
+                disp(['Radio del círculo verde: ' num2str(current_radius_green)]);
+
+                % Restar el radio del círculo verde del azul
+                anchura_aro_negro = current_radius_green - radiusBlue;
+                disp(['Anchura aro negro: ' num2str(anchura_aro_negro)]);
+
+                % Calcular y mostrar la anchura de la zona blanca
+                anchura_zona_blanca = current_radius_green - radiusBlue;
+                disp(['Anchura zona blanca: ' num2str(anchura_zona_blanca)]);
+
+                % Crear y dibujar círculos adicionales, cada uno más grande que el anterior
+                current_radius = current_radius_green;
+                for i = 1:5
+                    % Incrementar el radio del círculo adicional
+                    current_radius = current_radius + (anchura_zona_blanca * 1.32);
+                    
+                    while true
+                        % Crear máscara circular para el círculo adicional
+                        maskCirculoAdicional = uint8((X - centerXBlue).^2 + (Y - centerYBlue).^2 <= current_radius^2);
+
+                        % Encontrar píxeles en el borde del círculo adicional
+                        border_pixels_adicional = bwperim(maskCirculoAdicional);
+
+                        % Calcular porcentaje de píxeles oscuros en el borde del círculo adicional
+                        black_pixels_on_border_adicional = sum(only_aros_recortada(border_pixels_adicional) == 0);
+                        total_border_pixels_adicional = sum(border_pixels_adicional(:));
+                        black_percentage_on_border_adicional = black_pixels_on_border_adicional / total_border_pixels_adicional;
+
+                        % Verificar si el porcentaje de píxeles oscuros en el borde alcanza el umbral
+                        if black_percentage_on_border_adicional >= black_pixel_percentage_threshold
+                            % Dibujar el círculo adicional en verde
+                            viscircles([centerXBlue, centerYBlue], current_radius, 'EdgeColor', 'g', 'LineWidth', 1);
+                            break;
+                        end
+
+                        % Aumentar el radio del círculo adicional en un 5% para la siguiente iteración
+                        current_radius = current_radius * 1.05;
+                    end
+
+                    % Mostrar el radio de cada nuevo círculo en la barra de comandos
+                    disp(['Radio del círculo adicional ' num2str(i) ': ' num2str(current_radius)]);
+                end
+
+                % Calcular el radio del primer círculo morado basado en la anchura de la zona blanca
+                radio_morado = current_radius_green + anchura_zona_blanca;
+
+                % Reducir el radio del círculo morado hasta que el porcentaje de píxeles negros en el borde sea 80%
+                while true
+                    % Crear máscara circular para el círculo morado
+                    maskCirculoMorado = uint8((X - centerXBlue).^2 + (Y - centerYBlue).^2 <= radio_morado^2);
+
+                    % Encontrar píxeles en el borde del círculo morado
+                    border_pixels_morado = bwperim(maskCirculoMorado);
+
+                    % Calcular porcentaje de píxeles negros en el borde del círculo morado
+                    black_pixels_on_border_morado = sum(only_aros_recortada(border_pixels_morado) == 0);
+                    total_border_pixels_morado = sum(border_pixels_morado(:));
+                    black_percentage_on_border_morado = black_pixels_on_border_morado / total_border_pixels_morado;
+
+                    % Verificar si el porcentaje de píxeles negros en el borde alcanza el umbral
+                    if black_percentage_on_border_morado >= purple_black_pixel_percentage_threshold
+                        % Dibujar el círculo morado ajustado
+                        viscircles([centerXBlue, centerYBlue], radio_morado, 'EdgeColor', 'm', 'LineWidth', 1);
+
+                        % Mostrar el radio del círculo morado ajustado en la barra de comandos
+                        disp(['Radio del círculo morado ajustado: ' num2str(radio_morado)]);
+                        break;
+                    end
+
+                    % Reducir el radio en un 5% para la siguiente iteración
+                    radio_morado = radio_morado * 0.95;
+                end
+
+                % Crear y dibujar los 5 círculos rojos
+                for i = 1:5
+                    % Calcular el radio del nuevo círculo rojo
+                    radio_rojo = radio_morado + (1.5 * anchura_zona_blanca);
+
+                    % Ajustar el radio del círculo rojo hasta que al máximo el 80% de sus píxeles en el borde sean blancos
+                    while true
+                        % Crear máscara circular para el círculo rojo
+                        maskCirculoRojo = uint8((X - centerXBlue).^2 + (Y - centerYBlue).^2 <= radio_rojo^2);
+
+                        % Encontrar píxeles en el borde del círculo rojo
+                        border_pixels_rojo = bwperim(maskCirculoRojo);
+
+                        % Calcular porcentaje de píxeles blancos en el borde del círculo rojo
+                        white_pixels_on_border_rojo = sum(only_aros_recortada(border_pixels_rojo) == 255);
+                        total_border_pixels_rojo = sum(border_pixels_rojo(:));
+                        white_percentage_on_border_rojo = white_pixels_on_border_rojo / total_border_pixels_rojo;
+
+                        % Verificar si el porcentaje de píxeles blancos en el borde alcanza el umbral
+                        if white_percentage_on_border_rojo <= red_white_pixel_percentage_threshold
+% Dibujar el círculo rojo
+                            viscircles([centerXBlue, centerYBlue], radio_rojo, 'EdgeColor', 'm', 'LineWidth', 1);
+                            break;
+                        end
+
+                        % Reducir el radio del círculo rojo en un 5% para la siguiente iteración
+                        radio_rojo = radio_rojo * 0.95;
+                    end
+
+                    % Mostrar el radio de cada nuevo círculo rojo en la barra de comandos
+                    disp(['Radio del círculo rojo ' num2str(i) ': ' num2str(radio_rojo)]);
+
+                    % Actualizar el radio para el siguiente círculo rojo
+                    radio_morado = radio_rojo;
+                end
+
+                break;
+            end
+
+            % Aumentar el radio en un 5% para la siguiente iteración
+            current_radius_green = current_radius_green * 1.05;
+        end
+    end
+end
